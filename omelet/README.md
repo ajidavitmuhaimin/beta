@@ -1,2 +1,2 @@
 # Omelet
-## Read information from a color Bubble
+###### Simple alternative for QR Code
