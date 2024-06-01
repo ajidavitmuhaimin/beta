@@ -1,2 +1,2 @@
-# An example how to use IntersectionObserver API on JavaScript
+###### An example how to use IntersectionObserver API on JavaScript
 
