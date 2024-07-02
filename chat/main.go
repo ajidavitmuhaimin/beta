@@ -1,31 +1,75 @@
 package main
 
 import (
-    "log"
+    "fmt"
     "net/http"
-    "github.com/r3labs/sse/v2"
+    "github.com/gorilla/websocket"
 )
 
+var upgrader = websocket.Upgrader{
+    ReadBufferSize:  1024,
+    WriteBufferSize: 1024,
+    CheckOrigin: func(r *http.Request) bool {
+        return true
+    },
+}
+
+var clients = make(map[*websocket.Conn]bool)
+var broadcast = make(chan Message)
+
+type Message struct {
+    Username string `json:"username"`
+    Message  string `json:"message"`
+}
+
 func main() {
-    // Create an SSE server
-    stream := sse.New()
-    stream.CreateStream("chat")
+    http.HandleFunc("/", handleHome)
+    http.HandleFunc("/ws", handleConnections)
+    go handleMessages()
 
-    // Handle message sending
-    http.HandleFunc("/send", func(w http.ResponseWriter, r *http.Request) {
-        message := r.URL.Query().Get("message")
-        stream.Publish("chat", &sse.Event{
-            Data: []byte(message),
-        })
-        w.WriteHeader(http.StatusOK)
-    })
+    fmt.Println("Server started on :8080")
+    err := http.ListenAndServe(":8080", nil)
+    if err != nil {
+        fmt.Println("Error starting server:", err)
+    }
+}
 
-    // Serve the SSE stream
-    http.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
-        stream.ServeHTTP(w, r)
-    })
+func handleHome(w http.ResponseWriter, r *http.Request) {
+    http.ServeFile(w, r, "index.html")
+}
 
+func handleConnections(w http.ResponseWriter, r *http.Request) {
+    ws, err := upgrader.Upgrade(w, r, nil)
+    if err != nil {
+        fmt.Println(err)
+        return
+    }
+    defer ws.Close()
 
-    log.Println("Server started at :1395")
-    log.Fatal(http.ListenAndServe(":1395", nil))
+    clients[ws] = true
+
+    for {
+        var msg Message
+        err := ws.ReadJSON(&msg)
+        if err != nil {
+            fmt.Println("Error reading JSON:", err)
+            delete(clients, ws)
+            break
+        }
+        broadcast <- msg
+    }
+}
+
+func handleMessages() {
+    for {
+        msg := <-broadcast
+        for client := range clients {
+            err := client.WriteJSON(msg)
+            if err != nil {
+                fmt.Println("Error writing JSON:", err)
+                client.Close()
+                delete(clients, client)
+            }
+        }
+    }
 }
